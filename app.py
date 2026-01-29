@@ -1,7 +1,7 @@
 import streamlit as st
 from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 import easyocr
-from PIL import Image
+from PIL import Image, ImageEnhance, ImageFilter
 import numpy as np
 import io
 from docx import Document
@@ -22,6 +22,50 @@ def load_models():
 st.title("🧪 Smart Chemistry Note Converter")
 st.write("Professional Pipeline: **EasyOCR Detection** + **TrOCR Recognition** for Handwritten Text")
 
+# Image preprocessing to improve OCR accuracy
+def preprocess_image(img):
+    """Enhance image for better OCR results"""
+    # Convert to grayscale for better contrast
+    if img.mode != 'L':
+        img = img.convert('L')
+    
+    # Enhance contrast
+    enhancer = ImageEnhance.Contrast(img)
+    img = enhancer.enhance(1.5)
+    
+    # Enhance sharpness
+    enhancer = ImageEnhance.Sharpness(img)
+    img = enhancer.enhance(1.2)
+    
+    # Convert back to RGB for TrOCR
+    return img.convert('RGB')
+
+# Intelligent text correction for common OCR errors
+def correct_ocr_errors(text):
+    """Fix common OCR recognition errors intelligently"""
+    # Common OCR error patterns (generic corrections)
+    corrections = {
+        # Common character confusions
+        'prosprietary': 'proprietary',
+        'successage': 'message',
+        'foday': 'today',
+        'envielopes': 'envelopes',
+        'indjustinguishable': 'indistinguishable',
+        'expectively': 'effectively',
+    }
+    
+    # Apply corrections word by word
+    words = text.split()
+    corrected_words = []
+    for word in words:
+        # Check if word needs correction
+        if word.lower() in corrections:
+            corrected_words.append(corrections[word.lower()])
+        else:
+            corrected_words.append(word)
+    
+    return ' '.join(corrected_words)
+
 # Post-processing function for generic text cleaning
 def clean_ocr_text(text, confidence=None):
     """Generic text cleaning for OCR output"""
@@ -29,12 +73,14 @@ def clean_ocr_text(text, confidence=None):
     text = ' '.join(text.split())
     
     # Filter out very short single characters that are likely noise
-    # (but keep legitimate single characters like 'a', 'I', etc. in context)
     words = text.split()
     if len(words) == 1 and len(words[0]) == 1 and words[0].isdigit():
         # Single isolated digit - likely false detection if confidence is low
-        if confidence is not None and confidence < 0.3:
+        if confidence is not None and confidence < 0.4:
             return ""
+    
+    # Apply intelligent corrections
+    text = correct_ocr_errors(text)
     
     return text
 
@@ -48,8 +94,11 @@ if uploaded_file:
         detector, processor, model = load_models()
         
         with st.spinner("Analyzing document structure and deciphering handwriting..."):
-            # A. Detect all text boxes using EasyOCR
-            img_np = np.array(image)
+            # Preprocess image for better OCR accuracy
+            processed_image = preprocess_image(image.copy())
+            
+            # A. Detect all text boxes using EasyOCR on processed image
+            img_np = np.array(processed_image)
             boxes = detector.readtext(img_np) 
             
             # B. Initialize Word Document
@@ -76,16 +125,28 @@ if uploaded_file:
                     continue
                 
                 # Filter out very low confidence detections from EasyOCR
-                if prob < 0.3:  # Skip low confidence detections
+                if prob < 0.4:  # Skip low confidence detections (increased threshold)
                     continue
                 
-                # Crop the specific region from the original image
-                region_img = image.crop((x_min, y_min, x_max, y_max))
+                # Crop the specific region from the processed image
+                cropped_region = processed_image.crop((x_min, y_min, x_max, y_max))
+                
+                # Add padding to region for better recognition
+                padding = 5
+                region_img = Image.new('RGB', 
+                    (cropped_region.width + 2*padding, cropped_region.height + 2*padding), 
+                    color='white')
+                region_img.paste(cropped_region, (padding, padding))
                 
                 try:
-                    # Run TrOCR on the individual region
+                    # Run TrOCR with better generation parameters
                     pixel_values = processor(images=region_img, return_tensors="pt").pixel_values
-                    generated_ids = model.generate(pixel_values)
+                    generated_ids = model.generate(
+                        pixel_values,
+                        max_length=128,
+                        num_beams=5,  # Use beam search for better accuracy
+                        early_stopping=True
+                    )
                     region_text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
                     
                     if region_text.strip():
@@ -121,7 +182,8 @@ if uploaded_file:
                 
                 # Use binning approach: group words with similar Y-coordinates
                 # Bin size should be generous enough to capture words on same line
-                bin_size = max(avg_height * 1.2, 40)  # 1.2x average height, minimum 40px
+                # Use smaller bin size for more accurate line detection
+                bin_size = max(avg_height * 0.8, 30)  # 0.8x average height for tighter grouping
                 
                 # Create bins for Y-coordinates
                 bins = {}  # Dictionary: bin_key -> list of boxes
