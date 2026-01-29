@@ -110,107 +110,106 @@ if uploaded_file:
                 st.error("No text regions detected. Please ensure the image is clear and well-lit.")
             else:
                 # Group boxes by Y-coordinate to form lines
-            box_data = []
-            for bbox, text_guess, prob in boxes:
-                x_min = max(0, int(bbox[0][0]))
-                y_min = max(0, int(bbox[0][1]))
-                x_max = int(bbox[2][0])
-                y_max = int(bbox[2][1])
-                width = x_max - x_min
-                height = y_max - y_min
-                
-                if width < 5 or height < 5 or prob < 0.3:
-                    continue
-                
-                box_data.append({
-                    'bbox': (x_min, y_min, x_max, y_max),
-                    'y_center': (y_min + y_max) / 2,
-                    'height': height,
-                    'prob': prob
-                })
-            
-            if not box_data:
-                st.error("No valid text regions found.")
-                return
-            
-            # Group boxes into lines using Y-coordinate binning
-            heights = [b['height'] for b in box_data]
-            avg_height = sum(heights) / len(heights)
-            bin_size = max(avg_height * 1.0, 35)
-            
-            bins = {}
-            for box in box_data:
-                bin_key = int(box['y_center'] / bin_size)
-                if bin_key not in bins:
-                    bins[bin_key] = []
-                bins[bin_key].append(box)
-            
-            # Process each line as a whole for better accuracy
-            formatted_lines = []
-            progress_bar = st.progress(0)
-            total_lines = len(bins)
-            
-            for line_idx, bin_key in enumerate(sorted(bins.keys())):
-                line_boxes = bins[bin_key]
-                line_boxes.sort(key=lambda b: b['bbox'][0])  # Sort by X position
-                
-                # Create a combined region for the entire line
-                x_min = min(b['bbox'][0] for b in line_boxes)
-                y_min = min(b['bbox'][1] for b in line_boxes)
-                x_max = max(b['bbox'][2] for b in line_boxes)
-                y_max = max(b['bbox'][3] for b in line_boxes)
-                
-                # Expand region slightly to capture full line
-                padding = 10
-                x_min = max(0, x_min - padding)
-                y_min = max(0, y_min - padding)
-                x_max = min(processed_image.width, x_max + padding)
-                y_max = min(processed_image.height, y_max + padding)
-                
-                # Crop the entire line region
-                line_region = processed_image.crop((x_min, y_min, x_max, y_max))
-                
-                try:
-                    # Process entire line with TrOCR for better context
-                    pixel_values = processor(images=line_region, return_tensors="pt").pixel_values
-                    generated_ids = model.generate(
-                        pixel_values,
-                        max_length=256,
-                        num_beams=5,
-                        early_stopping=True
-                    )
-                    line_text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+                box_data = []
+                for bbox, text_guess, prob in boxes:
+                    x_min = max(0, int(bbox[0][0]))
+                    y_min = max(0, int(bbox[0][1]))
+                    x_max = int(bbox[2][0])
+                    y_max = int(bbox[2][1])
+                    width = x_max - x_min
+                    height = y_max - y_min
                     
-                    if line_text.strip():
-                        # Clean and correct the text
-                        cleaned_text = clean_ocr_text(line_text.strip())
-                        if cleaned_text.strip():
-                            formatted_lines.append(cleaned_text.strip())
-                            doc.add_paragraph(cleaned_text.strip())
-                
-                except Exception as e:
-                    st.warning(f"Skipped line {line_idx + 1}")
-                
-                progress_bar.progress((line_idx + 1) / total_lines)
-                
-                if formatted_lines:
-                    final_output = "\n".join(formatted_lines)
+                    if width < 5 or height < 5 or prob < 0.3:
+                        continue
                     
-                    st.success("Full Page Processed Successfully!")
-                    st.text_area("Extraction Preview:", final_output, height=350)
-                    
-                    # Save to Word format
-                    bio = io.BytesIO()
-                    doc.save(bio)
-                    
-                    st.download_button(
-                        label="📥 Download as Word (.docx)",
-                        data=bio.getvalue(),
-                        file_name="Converted_Chemistry_Notes.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                    )
+                    box_data.append({
+                        'bbox': (x_min, y_min, x_max, y_max),
+                        'y_center': (y_min + y_max) / 2,
+                        'height': height,
+                        'prob': prob
+                    })
+                
+                if not box_data:
+                    st.error("No valid text regions found.")
                 else:
-                    st.error("No legible text was detected. Please ensure the image is clear and well-lit.")
+                    # Group boxes into lines using Y-coordinate binning
+                    heights = [b['height'] for b in box_data]
+                    avg_height = sum(heights) / len(heights)
+                    bin_size = max(avg_height * 1.0, 35)
+                    
+                    bins = {}
+                    for box in box_data:
+                        bin_key = int(box['y_center'] / bin_size)
+                        if bin_key not in bins:
+                            bins[bin_key] = []
+                        bins[bin_key].append(box)
+                    
+                    # Process each line as a whole for better accuracy
+                    formatted_lines = []
+                    progress_bar = st.progress(0)
+                    total_lines = len(bins)
+                    
+                    for line_idx, bin_key in enumerate(sorted(bins.keys())):
+                        line_boxes = bins[bin_key]
+                        line_boxes.sort(key=lambda b: b['bbox'][0])  # Sort by X position
+                        
+                        # Create a combined region for the entire line
+                        x_min = min(b['bbox'][0] for b in line_boxes)
+                        y_min = min(b['bbox'][1] for b in line_boxes)
+                        x_max = max(b['bbox'][2] for b in line_boxes)
+                        y_max = max(b['bbox'][3] for b in line_boxes)
+                        
+                        # Expand region slightly to capture full line
+                        padding = 10
+                        x_min = max(0, x_min - padding)
+                        y_min = max(0, y_min - padding)
+                        x_max = min(processed_image.width, x_max + padding)
+                        y_max = min(processed_image.height, y_max + padding)
+                        
+                        # Crop the entire line region
+                        line_region = processed_image.crop((x_min, y_min, x_max, y_max))
+                        
+                        try:
+                            # Process entire line with TrOCR for better context
+                            pixel_values = processor(images=line_region, return_tensors="pt").pixel_values
+                            generated_ids = model.generate(
+                                pixel_values,
+                                max_length=256,
+                                num_beams=5,
+                                early_stopping=True
+                            )
+                            line_text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+                            
+                            if line_text.strip():
+                                # Clean and correct the text
+                                cleaned_text = clean_ocr_text(line_text.strip())
+                                if cleaned_text.strip():
+                                    formatted_lines.append(cleaned_text.strip())
+                                    doc.add_paragraph(cleaned_text.strip())
+                        
+                        except Exception as e:
+                            st.warning(f"Skipped line {line_idx + 1}")
+                        
+                        progress_bar.progress((line_idx + 1) / total_lines)
+                    
+                    if formatted_lines:
+                        final_output = "\n".join(formatted_lines)
+                        
+                        st.success("Full Page Processed Successfully!")
+                        st.text_area("Extraction Preview:", final_output, height=350)
+                        
+                        # Save to Word format
+                        bio = io.BytesIO()
+                        doc.save(bio)
+                        
+                        st.download_button(
+                            label="📥 Download as Word (.docx)",
+                            data=bio.getvalue(),
+                            file_name="Converted_Chemistry_Notes.docx",
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        )
+                    else:
+                        st.error("No legible text was detected. Please ensure the image is clear and well-lit.")
 
 st.divider()
 st.caption("VirtualCo AI Pipeline v2.3 | Using EasyOCR + TrOCR for Handwritten Text Recognition")
