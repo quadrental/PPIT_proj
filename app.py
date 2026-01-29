@@ -22,33 +22,21 @@ def load_models():
 st.title("🧪 Smart Chemistry Note Converter")
 st.write("Professional Pipeline: **EasyOCR Detection** + **TrOCR Recognition** for Handwritten Text")
 
-# Post-processing function to fix common OCR errors
-def fix_ocr_errors(text):
-    """Fix common OCR recognition errors"""
-    # Common OCR error corrections
-    corrections = {
-        'successage': 'message',
-        'foday': 'today',
-        'prosprietary': 'proprietary',
-        'envielopes': 'envelopes',
-        'indjustinguishable': 'indistinguishable',
-        'expectively': 'effectively',
-    }
+# Post-processing function for generic text cleaning
+def clean_ocr_text(text, confidence=None):
+    """Generic text cleaning for OCR output"""
+    # Basic cleaning: remove extra whitespace
+    text = ' '.join(text.split())
     
-    # Apply corrections
-    for error, correct in corrections.items():
-        text = text.replace(error, correct)
-    
-    # Remove single digit numbers that are likely false detections
+    # Filter out very short single characters that are likely noise
+    # (but keep legitimate single characters like 'a', 'I', etc. in context)
     words = text.split()
-    filtered_words = []
-    for word in words:
-        # Skip single digit numbers (likely false OCR detections)
-        if word.isdigit() and len(word) == 1:
-            continue
-        filtered_words.append(word)
+    if len(words) == 1 and len(words[0]) == 1 and words[0].isdigit():
+        # Single isolated digit - likely false detection if confidence is low
+        if confidence is not None and confidence < 0.3:
+            return ""
     
-    return ' '.join(filtered_words)
+    return text
 
 uploaded_file = st.file_uploader("Upload Handwritten Page", type=["jpg", "png", "jpeg"])
 
@@ -87,6 +75,10 @@ if uploaded_file:
                 if width < 5 or height < 5:
                     continue
                 
+                # Filter out very low confidence detections from EasyOCR
+                if prob < 0.3:  # Skip low confidence detections
+                    continue
+                
                 # Crop the specific region from the original image
                 region_img = image.crop((x_min, y_min, x_max, y_max))
                 
@@ -97,10 +89,10 @@ if uploaded_file:
                     region_text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
                     
                     if region_text.strip():
-                        # Post-process text to fix OCR errors
-                        cleaned_text = fix_ocr_errors(region_text.strip())
+                        # Generic text cleaning
+                        cleaned_text = clean_ocr_text(region_text.strip(), confidence=prob)
                         
-                        # Skip if text is empty after cleaning (e.g., single digits removed)
+                        # Skip if text is empty after cleaning
                         if cleaned_text.strip():
                             # Store text with its position for grouping
                             text_boxes.append({
