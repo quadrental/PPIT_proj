@@ -1,4 +1,7 @@
 streamlit
-easyocr
-opencv-python-headless
+transformers
+torch
+torchvision
+pillow
 python-docx
+sentencepiece
