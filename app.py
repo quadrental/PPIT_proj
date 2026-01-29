@@ -86,66 +86,39 @@ if uploaded_file:
                 # Update UI progress
                 progress_bar.progress((i + 1) / len(boxes))
 
-            # D. Group text boxes by lines using accurate clustering algorithm
+            # D. Group text boxes by lines using Y-coordinate binning (most reliable method)
             if text_boxes:
                 img_height = image.height
                 
-                # Sort all boxes by Y position (top to bottom), then by X (left to right)
-                text_boxes_sorted = sorted(text_boxes, key=lambda b: (b['y_center'], b['x_min']))
+                # Calculate average text height for bin size
+                heights = [box['height'] for box in text_boxes]
+                avg_height = sum(heights) / len(heights) if heights else 30
                 
-                # Calculate adaptive threshold based on actual spacing between words
-                if len(text_boxes_sorted) > 1:
-                    # Calculate Y differences between consecutive boxes
-                    y_diffs = []
-                    for i in range(len(text_boxes_sorted) - 1):
-                        y_diff = abs(text_boxes_sorted[i+1]['y_center'] - text_boxes_sorted[i]['y_center'])
-                        y_diffs.append(y_diff)
+                # Use binning approach: group words with similar Y-coordinates
+                # Bin size should be generous enough to capture words on same line
+                bin_size = max(avg_height * 1.2, 40)  # 1.2x average height, minimum 40px
+                
+                # Create bins for Y-coordinates
+                bins = {}  # Dictionary: bin_key -> list of boxes
+                
+                for box in text_boxes:
+                    # Calculate which bin this box belongs to based on Y-center
+                    bin_key = int(box['y_center'] / bin_size)
                     
-                    # Separate small gaps (words on same line) from large gaps (line breaks)
-                    # Use median of small differences as threshold
-                    import statistics
-                    small_diffs = [d for d in y_diffs if d < img_height * 0.1]  # Ignore large gaps
-                    if small_diffs:
-                        median_small_diff = statistics.median(small_diffs)
-                        # Use 0.7x median for conservative grouping (only group very close words)
-                        line_threshold = max(median_small_diff * 0.7, 15)
-                    else:
-                        # Fallback: use average height
-                        heights = [box['height'] for box in text_boxes]
-                        avg_height = sum(heights) / len(heights)
-                        line_threshold = max(avg_height * 0.6, 20)
-                else:
-                    line_threshold = 25
+                    # Add box to appropriate bin
+                    if bin_key not in bins:
+                        bins[bin_key] = []
+                    bins[bin_key].append(box)
                 
-                # Group boxes into lines using conservative threshold
+                # Convert bins to lines and sort
                 lines = []
-                current_line = [text_boxes_sorted[0]]
-                current_line_y = text_boxes_sorted[0]['y_center']
-                
-                for i in range(1, len(text_boxes_sorted)):
-                    box = text_boxes_sorted[i]
-                    y_diff = abs(box['y_center'] - current_line_y)
+                for bin_key in sorted(bins.keys()):
+                    # Get all boxes in this bin
+                    line_boxes = bins[bin_key]
                     
-                    # Also check if boxes overlap vertically (more reliable indicator of same line)
-                    y_overlap = not (box['y_min'] > current_line[-1]['y_max'] or box['y_max'] < current_line[-1]['y_min'])
-                    
-                    if y_diff <= line_threshold and y_overlap:
-                        # Same line - add to current line
-                        current_line.append(box)
-                        # Update average Y position of the line
-                        current_line_y = sum(b['y_center'] for b in current_line) / len(current_line)
-                    else:
-                        # New line detected - save current line and start new one
-                        # Sort boxes in line by X position (left to right) for correct reading order
-                        current_line.sort(key=lambda b: b['x_min'])
-                        lines.append(current_line)
-                        current_line = [box]
-                        current_line_y = box['y_center']
-                
-                # Don't forget the last line
-                if current_line:
-                    current_line.sort(key=lambda b: b['x_min'])
-                    lines.append(current_line)
+                    # Sort boxes in this bin by X position (left to right)
+                    line_boxes.sort(key=lambda b: b['x_min'])
+                    lines.append(line_boxes)
                 
                 # Build formatted output
                 formatted_lines = []
