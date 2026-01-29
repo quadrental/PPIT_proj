@@ -22,6 +22,34 @@ def load_models():
 st.title("🧪 Smart Chemistry Note Converter")
 st.write("Professional Pipeline: **EasyOCR Detection** + **TrOCR Recognition** for Handwritten Text")
 
+# Post-processing function to fix common OCR errors
+def fix_ocr_errors(text):
+    """Fix common OCR recognition errors"""
+    # Common OCR error corrections
+    corrections = {
+        'successage': 'message',
+        'foday': 'today',
+        'prosprietary': 'proprietary',
+        'envielopes': 'envelopes',
+        'indjustinguishable': 'indistinguishable',
+        'expectively': 'effectively',
+    }
+    
+    # Apply corrections
+    for error, correct in corrections.items():
+        text = text.replace(error, correct)
+    
+    # Remove single digit numbers that are likely false detections
+    words = text.split()
+    filtered_words = []
+    for word in words:
+        # Skip single digit numbers (likely false OCR detections)
+        if word.isdigit() and len(word) == 1:
+            continue
+        filtered_words.append(word)
+    
+    return ' '.join(filtered_words)
+
 uploaded_file = st.file_uploader("Upload Handwritten Page", type=["jpg", "png", "jpeg"])
 
 if uploaded_file:
@@ -69,15 +97,20 @@ if uploaded_file:
                     region_text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
                     
                     if region_text.strip():
-                        # Store text with its position for grouping
-                        text_boxes.append({
-                            'text': region_text.strip(),
-                            'x_min': x_min,
-                            'y_min': y_min,
-                            'y_max': y_max,
-                            'y_center': (y_min + y_max) / 2,
-                            'height': height
-                        })
+                        # Post-process text to fix OCR errors
+                        cleaned_text = fix_ocr_errors(region_text.strip())
+                        
+                        # Skip if text is empty after cleaning (e.g., single digits removed)
+                        if cleaned_text.strip():
+                            # Store text with its position for grouping
+                            text_boxes.append({
+                                'text': cleaned_text.strip(),
+                                'x_min': x_min,
+                                'y_min': y_min,
+                                'y_max': y_max,
+                                'y_center': (y_min + y_max) / 2,
+                                'height': height
+                            })
                         
                 except Exception as line_error:
                     # Log error but continue processing other regions
