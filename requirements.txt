@@ -1,7 +1,8 @@
 streamlit
 transformers
+easyocr
 torch
 torchvision
 pillow
 python-docx
-sentencepiece
+numpy
