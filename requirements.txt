@@ -1,6 +1,7 @@
 streamlit
-pytesseract
-python-docx
+transformers
+torch
+torchvision
 pillow
-opencv-python-headless
-numpy
+python-docx
+sentencepiece
