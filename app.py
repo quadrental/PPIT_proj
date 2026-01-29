@@ -86,23 +86,38 @@ if uploaded_file:
                 # Update UI progress
                 progress_bar.progress((i + 1) / len(boxes))
 
-            # D. Group text boxes by lines using improved algorithm
+            # D. Group text boxes by lines using accurate clustering algorithm
             if text_boxes:
                 img_height = image.height
                 
-                # Calculate adaptive threshold based on actual text box heights
-                if len(text_boxes) > 1:
-                    heights = [box['height'] for box in text_boxes]
-                    avg_height = sum(heights) / len(heights)
-                    # Use 2x average height for very generous grouping
-                    line_threshold = max(avg_height * 2.0, 50)
+                # Sort all boxes by Y position (top to bottom), then by X (left to right)
+                text_boxes_sorted = sorted(text_boxes, key=lambda b: (b['y_center'], b['x_min']))
+                
+                # Calculate adaptive threshold based on actual spacing between words
+                if len(text_boxes_sorted) > 1:
+                    # Calculate Y differences between consecutive boxes
+                    y_diffs = []
+                    for i in range(len(text_boxes_sorted) - 1):
+                        y_diff = abs(text_boxes_sorted[i+1]['y_center'] - text_boxes_sorted[i]['y_center'])
+                        y_diffs.append(y_diff)
+                    
+                    # Separate small gaps (words on same line) from large gaps (line breaks)
+                    # Use median of small differences as threshold
+                    import statistics
+                    small_diffs = [d for d in y_diffs if d < img_height * 0.1]  # Ignore large gaps
+                    if small_diffs:
+                        median_small_diff = statistics.median(small_diffs)
+                        # Use 0.7x median for conservative grouping (only group very close words)
+                        line_threshold = max(median_small_diff * 0.7, 15)
+                    else:
+                        # Fallback: use average height
+                        heights = [box['height'] for box in text_boxes]
+                        avg_height = sum(heights) / len(heights)
+                        line_threshold = max(avg_height * 0.6, 20)
                 else:
-                    line_threshold = 60
+                    line_threshold = 25
                 
-                # Sort all boxes by Y position (top to bottom)
-                text_boxes_sorted = sorted(text_boxes, key=lambda b: b['y_center'])
-                
-                # Group boxes into lines using clustering approach
+                # Group boxes into lines using conservative threshold
                 lines = []
                 current_line = [text_boxes_sorted[0]]
                 current_line_y = text_boxes_sorted[0]['y_center']
@@ -111,14 +126,17 @@ if uploaded_file:
                     box = text_boxes_sorted[i]
                     y_diff = abs(box['y_center'] - current_line_y)
                     
-                    if y_diff <= line_threshold:
+                    # Also check if boxes overlap vertically (more reliable indicator of same line)
+                    y_overlap = not (box['y_min'] > current_line[-1]['y_max'] or box['y_max'] < current_line[-1]['y_min'])
+                    
+                    if y_diff <= line_threshold and y_overlap:
                         # Same line - add to current line
                         current_line.append(box)
                         # Update average Y position of the line
                         current_line_y = sum(b['y_center'] for b in current_line) / len(current_line)
                     else:
                         # New line detected - save current line and start new one
-                        # Sort boxes in line by X position (left to right)
+                        # Sort boxes in line by X position (left to right) for correct reading order
                         current_line.sort(key=lambda b: b['x_min'])
                         lines.append(current_line)
                         current_line = [box]
