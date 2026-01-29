@@ -1,4 +1,8 @@
 streamlit
-pytesseract
+transformers
+easyocr
+torch
+torchvision
 pillow
 python-docx
+numpy
